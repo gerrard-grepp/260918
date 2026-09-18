@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AX 세미나 키 등록기 (내 PC 전용)</title>
+<style>
+body{margin:0;background:#0F1626;color:#E9EEF7;font:15px/1.6 -apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+.w{max-width:820px;margin:0 auto;padding:32px 20px 64px}
+h1{font-size:24px;margin:0 0 6px}
+p{color:#A3AEC4;margin:0 0 14px}
+textarea{width:100%;min-height:200px;background:#141D2D;color:#E9EEF7;border:1px solid #2A3651;border-radius:10px;padding:14px;font:13px/1.5 ui-monospace,Consolas,monospace}
+button{margin-top:14px;background:#0078FF;color:#fff;border:0;border-radius:9px;padding:12px 20px;font-size:16px;font-weight:600;cursor:pointer}
+button.ghost{background:#243049;margin-left:8px}
+.out{margin-top:18px}
+code{color:#8FC0FF}
+.warn{background:#3A2416;color:#F7B98A;border-radius:10px;padding:12px 14px;margin-top:18px;font-size:14px}
+</style></head><body><div class="w">
+<h1>AX 세미나 키 등록기</h1>
+<p>이 파일은 인터넷에 올리지 말고 내 PC에서만 여세요. 입력한 키는 이 브라우저 안에서 암호화되며 어디로도 전송되지 않습니다.</p>
+<p>아래에 <code>이름,회사,키</code> 형식으로 한 줄에 한 명씩 붙여 넣으세요. (회사는 비워도 됩니다)</p>
+<textarea id="src" placeholder="김민준,비즈테크아이,sk-ant-...&#10;박준호,비즈테크아이,sk-ant-...">
+</textarea>
+<button id="go">암호화하기</button><button class="ghost" id="copy">결과 복사</button>
+<div class="out"><textarea id="out" readonly placeholder="결과가 여기에 나옵니다. 이 블록을 제라드에게 전달하거나 페이지에 붙여 넣으세요."></textarea></div>
+<div class="warn">결과 블록에는 키 원문이 들어 있지 않습니다. 이름을 정확히 입력한 사람만 자기 키를 풀 수 있습니다.</div>
+<script>
+const PEPPER = 'axseminar-20260918:';
+const ITER = 150000;
+const enc = new TextEncoder();
+function norm(s){ return (s||'').normalize('NFC').replace(/\s+/g,'').toLowerCase(); }
+function b64e(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function b64d(str){ const bin=atob(str); const u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i); return u; }
+async function slot(name){
+  const h = await crypto.subtle.digest('SHA-256', enc.encode(PEPPER + norm(name)));
+  return b64e(h).slice(0, 16);
+}
+async function deriveKey(name, salt){
+  const base = await crypto.subtle.importKey('raw', enc.encode(PEPPER + norm(name)), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name:'PBKDF2', salt, iterations: ITER, hash:'SHA-256' }, base,
+    { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+}
+</script>
+<script>
+document.getElementById('go').addEventListener('click', async () => {
+  const rows = document.getElementById('src').value.split('\n').map(r=>r.trim()).filter(Boolean);
+  const out = [];
+  for(const r of rows){
+    const parts = r.split(',').map(x=>x.trim());
+    const name = parts[0], key = parts[parts.length-1];
+    if(!name || !key) continue;
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ck = await deriveKey(name, salt);
+    const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, ck, new TextEncoder().encode(key));
+    out.push({ s: await slot(name), salt: b64e(salt), iv: b64e(iv), ct: b64e(ct) });
+  }
+  document.getElementById('out').value = 'const VAULT = ' + JSON.stringify(out, null, 1) + ';';
+});
+document.getElementById('copy').addEventListener('click', () => {
+  const t = document.getElementById('out'); t.select(); document.execCommand('copy');
+});
+</script>
+</div></body></html>
